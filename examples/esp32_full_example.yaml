@@ -4,8 +4,10 @@
 # ║  Demonstrates:                                                             ║
 # ║  • Two PCA9698 chips on the same I2C bus (addresses 0x20 and 0x21)        ║
 # ║  • Mixed input/output pins on each chip                                   ║
-# ║  • Interrupt-driven input on chip 1, polling on chip 2                    ║
+# ║  • Interrupt-driven inputs on chip 1, polled inputs on chip 2             ║
 # ║  • Output-enable dimmer via LEDC (ESP32 hardware PWM) on chip 1           ║
+# ║    → Chip 1 outputs are lights: OE dims all of them together              ║
+# ║  • Chip 2 has no OE dimmer → outputs are switches (relays, valves, etc.)  ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 esphome:
@@ -44,32 +46,31 @@ i2c:
   frequency: 400kHz
 
 # ── LEDC output for Output-Enable dimmer on chip 1 ───────────────────────────
-# OE is active-LOW.  We drive OE with a PWM signal:
-#   duty = 0.0  → OE always LOW  → all outputs fully enabled  (default/on)
-#   duty = 0.5  → 50 % duty      → ~50 % brightness / dimmed
-#   duty = 1.0  → OE always HIGH → all outputs disabled       (off)
+# OE is active-LOW on the PCA9698.  With inverted: true the duty-cycle maps
+# intuitively: 100 % = OE low = outputs fully enabled, 0 % = OE high = outputs off.
 output:
   - platform: ledc
     id: pca9698_oe_pwm
     pin: GPIO18          # Connect this GPIO → OE pin of PCA9698 #1
     frequency: 1000 Hz
-    inverted: true       # OE is active-low; invert so 100 % = fully on, 0 % = off
+    inverted: true       # OE active-low: 100 % duty = fully on, 0 % = off
 
 # ── PCA9698 #1 – address 0x20 (A2=0, A1=0, A0=0) ─────────────────────────────
-# Uses interrupt pin for fast input detection + dimmer via LEDC.
+# Interrupt pin for fast input detection.
+# OE dimmer connected → all chip 1 outputs are lights, dimmed together via OE.
 pca9698:
   - id: io_expander_1
     address: 0x20
     interrupt_pin:
-      number: GPIO19       # Connect to INT pin of PCA9698 #1
-      mode: INPUT_PULLUP   # INT is open-drain, active-low
-      inverted: false
+      number: GPIO19       # Connect to INT pin of PCA9698 #1 (open-drain, needs pull-up)
+      mode: INPUT_PULLUP
     oe_output_id: pca9698_oe_pwm
-    dimmer_level: 100%     # 100 % = outputs fully enabled at startup
+    dimmer_level: 100%     # Outputs fully enabled at startup
 
 # ── PCA9698 #2 – address 0x21 (A2=0, A1=0, A0=1) ─────────────────────────────
 # No interrupt pin → polling every 100 ms.
-# No OE dimmer → OE should be tied to GND on this chip.
+# No OE dimmer → tie OE pin directly to GND on this chip.
+# Outputs are switches: relays, valves, pumps – not suitable for dimming.
   - id: io_expander_2
     address: 0x21
     polling_interval: 100ms
@@ -85,7 +86,7 @@ binary_sensor:
     name: "Button 0 (chip1 pin0)"
     pin:
       pca9698: io_expander_1
-      number: 0             # Port 0, bit 0
+      number: 0
       mode: INPUT
       inverted: true        # Active-low button
 
@@ -105,7 +106,6 @@ binary_sensor:
       pca9698: io_expander_1
       number: 8             # Port 1, bit 0
       mode: INPUT
-      inverted: false
     device_class: door
 
   # ── Chip 2 inputs (polled) ────────────────────────────────────────────────
@@ -128,38 +128,93 @@ binary_sensor:
       inverted: true
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Switches (outputs)
+# Lights (chip 1 outputs)
+#
+# Because chip 1's OE pin is driven by a PWM output, ALL outputs on chip 1
+# dim together when the master brightness is adjusted.  Individual outputs
+# are therefore modelled as binary (on/off) lights — their individual pins
+# simply gate whether each load is included in the dimmed group or not.
+# The master "PCA9698 Output Brightness" light controls the overall dim level.
 # ══════════════════════════════════════════════════════════════════════════════
 
-switch:
-  # ── Chip 1 outputs ────────────────────────────────────────────────────────
+light:
+  # ── Individual output lights (chip 1 pins) ────────────────────────────────
+  - platform: binary
+    id: light_0
+    name: "Light 0 (chip1 pin16)"
+    output: light_0_output
+
+  - platform: binary
+    id: light_1
+    name: "Light 1 (chip1 pin17)"
+    output: light_1_output
+
+  - platform: binary
+    id: light_2
+    name: "Light 2 (chip1 pin24)"
+    output: light_2_output
+
+  - platform: binary
+    id: light_3
+    name: "Light 3 (chip1 pin25)"
+    output: light_3_output
+
+  # ── Master brightness / OE dimmer (chip 1) ────────────────────────────────
+  # Adjusting this light's brightness dims all chip 1 outputs simultaneously
+  # via the OE PWM pin.  Turning it off disables all chip 1 outputs entirely.
+  - platform: monochromatic
+    id: output_dimmer
+    name: "PCA9698 Output Brightness"
+    output: pca9698_oe_pwm
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 500ms
+    on_state:
+      - lambda: |-
+          if (id(output_dimmer).current_values.is_on()) {
+            id(io_expander_1).set_dimmer_level(
+              id(output_dimmer).current_values.get_brightness());
+          } else {
+            id(io_expander_1).set_dimmer_level(0.0f);
+          }
+
+# ── GPIO outputs backing the binary lights above ──────────────────────────────
+# These output: entries are part of the same output: list as the LEDC above.
   - platform: gpio
-    id: relay_0
-    name: "Relay 0 (chip1 pin16)"
+    id: light_0_output
     pin:
       pca9698: io_expander_1
-      number: 16            # Port 2, bit 0
+      number: 16
       mode: OUTPUT
-      inverted: false
 
   - platform: gpio
-    id: relay_1
-    name: "Relay 1 (chip1 pin17)"
+    id: light_1_output
     pin:
       pca9698: io_expander_1
       number: 17
       mode: OUTPUT
 
   - platform: gpio
-    id: led_status
-    name: "Status LED (chip1 pin24)"
+    id: light_2_output
     pin:
       pca9698: io_expander_1
-      number: 24            # Port 3, bit 0
+      number: 24
       mode: OUTPUT
-      inverted: true        # LED on when pin LOW
 
-  # ── Chip 2 outputs ────────────────────────────────────────────────────────
+  - platform: gpio
+    id: light_3_output
+    pin:
+      pca9698: io_expander_1
+      number: 25
+      mode: OUTPUT
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Switches (chip 2 outputs)
+#
+# Chip 2 has no OE dimmer (OE tied to GND), so its outputs are full on/off
+# and are naturally modelled as switches: relays, valves, pumps, etc.
+# ══════════════════════════════════════════════════════════════════════════════
+
+switch:
   - platform: gpio
     id: pump_enable
     name: "Pump Enable (chip2 pin8)"
@@ -184,23 +239,18 @@ switch:
       number: 10
       mode: OUTPUT
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Monochromatic light – exposes the OE dimmer as a dimmable light in HA.
-# Turning the light ON/OFF enables/disables all PCA9698 outputs.
-# Adjusting brightness dims them proportionally via the OE PWM pin.
-# ══════════════════════════════════════════════════════════════════════════════
-light:
-  - platform: monochromatic
-    id: output_dimmer
-    name: "PCA9698 Output Brightness"
-    output: pca9698_oe_pwm
-    restore_mode: RESTORE_DEFAULT_ON
-    default_transition_length: 500ms
-    on_state:
-      - lambda: |-
-          if (id(output_dimmer).current_values.is_on()) {
-            id(io_expander_1).set_dimmer_level(
-              id(output_dimmer).current_values.get_brightness());
-          } else {
-            id(io_expander_1).set_dimmer_level(0.0f);
-          }
+  - platform: gpio
+    id: relay_0
+    name: "Relay 0 (chip2 pin16)"
+    pin:
+      pca9698: io_expander_2
+      number: 16
+      mode: OUTPUT
+
+  - platform: gpio
+    id: relay_1
+    name: "Relay 1 (chip2 pin17)"
+    pin:
+      pca9698: io_expander_2
+      number: 17
+      mode: OUTPUT
