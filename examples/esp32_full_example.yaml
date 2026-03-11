@@ -185,18 +185,21 @@ switch:
       mode: OUTPUT
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Number entity – control the output dimmer level via Home Assistant
-# 0 % = outputs fully off (OE high), 100 % = outputs fully on (OE low)
+# Monochromatic light – exposes the OE dimmer as a dimmable light in HA.
+# Turning the light ON/OFF enables/disables all PCA9698 outputs.
+# Adjusting brightness dims them proportionally via the OE PWM pin.
 # ══════════════════════════════════════════════════════════════════════════════
-number:
-  - platform: template
+light:
+  - platform: monochromatic
     id: output_dimmer
-    name: "PCA9698 Output Dimmer"
-    min_value: 0
-    max_value: 100
-    step: 1
-    unit_of_measurement: "%"
-    lambda: "return id(pca9698_oe_pwm).get_state() * 100.0f;"
-    set_action:
+    name: "PCA9698 Output Brightness"
+    output: pca9698_oe_pwm
+    default_transition_length: 500ms
+    on_state:
       - lambda: |-
-          id(io_expander_1).set_dimmer_level(x / 100.0f);
+          if (id(output_dimmer).current_values.is_on()) {
+            id(io_expander_1).set_dimmer_level(
+              id(output_dimmer).current_values.get_brightness());
+          } else {
+            id(io_expander_1).set_dimmer_level(0.0f);
+          }
