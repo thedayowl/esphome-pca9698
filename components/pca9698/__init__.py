@@ -78,15 +78,35 @@ def _validate_pin_number(value):
     return value
 
 
-PCA9698_PIN_SCHEMA = pins.gpio_base_schema(
-    PCA9698GPIOPin,
-    _validate_pin_number,
-    modes=[CONF_INPUT, CONF_OUTPUT, CONF_PULLUP],
-    mode_validator=cv.gpio_flags_expr,
-    invertable=True,
-).extend(
+# Mode schema: accept INPUT, OUTPUT, or INPUT_PULLUP as a dict like
+#   mode: INPUT  or  mode: { input: true, pullup: true }
+def _validate_pin_mode(value):
+    if isinstance(value, str):
+        value = value.upper()
+        mapping = {
+            "INPUT":        {CONF_INPUT: True,  CONF_OUTPUT: False, CONF_PULLUP: False},
+            "OUTPUT":       {CONF_INPUT: False, CONF_OUTPUT: True,  CONF_PULLUP: False},
+            "INPUT_PULLUP": {CONF_INPUT: True,  CONF_OUTPUT: False, CONF_PULLUP: True},
+        }
+        if value not in mapping:
+            raise cv.Invalid(f"Invalid pin mode '{value}'. Use INPUT, OUTPUT, or INPUT_PULLUP.")
+        return mapping[value]
+    return cv.Schema(
+        {
+            cv.Optional(CONF_INPUT,  default=False): cv.boolean,
+            cv.Optional(CONF_OUTPUT, default=False): cv.boolean,
+            cv.Optional(CONF_PULLUP, default=False): cv.boolean,
+        }
+    )(value)
+
+
+PCA9698_PIN_SCHEMA = cv.Schema(
     {
+        cv.GenerateID(): cv.declare_id(PCA9698GPIOPin),
         cv.Required(CONF_PCA9698_ID): cv.use_id(PCA9698Component),
+        cv.Required(CONF_NUMBER): _validate_pin_number,
+        cv.Optional(CONF_MODE, default="INPUT"): _validate_pin_mode,
+        cv.Optional(CONF_INVERTED, default=False): cv.boolean,
     }
 )
 
@@ -99,7 +119,18 @@ async def pca9698_pin_to_code(config):
     cg.add(var.set_parent(parent))
     cg.add(var.set_pin(config[CONF_NUMBER]))
     cg.add(var.set_inverted(config[CONF_INVERTED]))
-    cg.add(var.set_flags(await cg.gpio_flags_expr(config[CONF_MODE])))
-    cg.add(parent.register_pin(var))
 
+    # Build gpio::Flags expression from the mode dict
+    mode = config[CONF_MODE]
+    flag_parts = []
+    if mode.get(CONF_INPUT):
+        flag_parts.append("gpio::FLAG_INPUT")
+    if mode.get(CONF_OUTPUT):
+        flag_parts.append("gpio::FLAG_OUTPUT")
+    if mode.get(CONF_PULLUP):
+        flag_parts.append("gpio::FLAG_PULLUP")
+    flags_expr = " | ".join(flag_parts) if flag_parts else "gpio::FLAG_NONE"
+    cg.add(var.set_flags(cg.RawExpression(flags_expr)))
+
+    cg.add(parent.register_pin(var))
     return var
