@@ -3,7 +3,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
-from esphome.components import i2c
+from esphome.components import i2c, output
 from esphome.const import (
     CONF_ID,
     CONF_INPUT,
@@ -12,40 +12,23 @@ from esphome.const import (
     CONF_NUMBER,
     CONF_OUTPUT,
     CONF_PULLUP,
-    CONF_INTERRUPT_PIN,
-    CONF_POLLING_INTERVAL,
 )
 
-# ── Optional platform-specific PWM / LEDC imports ─────────────────────────────
-try:
-    from esphome.components.ledc import LEDCOutput, CONF_LEDC_ID  # ESP32
-    _HAS_LEDC = True
-except ImportError:
-    _HAS_LEDC = False
-
-try:
-    from esphome.components.esp8266_pwm import ESP8266PWMOutput  # ESP8266
-    _HAS_ESP8266_PWM = True
-except ImportError:
-    _HAS_ESP8266_PWM = False
-
 DEPENDENCIES = ["i2c"]
-AUTO_LOAD = []
+AUTO_LOAD = ["output"]
 MULTI_CONF = True  # Allow multiple PCA9698 instances (one per I2C address)
+
+# ── Local config key constants ────────────────────────────────────────────────
+CONF_PCA9698_ID      = "pca9698_id"
+CONF_OE_OUTPUT_ID    = "oe_output_id"
+CONF_DIMMER_LEVEL    = "dimmer_level"
+CONF_INTERRUPT_PIN   = "interrupt_pin"
+CONF_POLLING_INTERVAL = "polling_interval"
 
 # ── C++ namespace / class references ──────────────────────────────────────────
 pca9698_ns = cg.esphome_ns.namespace("pca9698")
 PCA9698Component = pca9698_ns.class_("PCA9698Component", cg.Component, i2c.I2CDevice)
 PCA9698GPIOPin   = pca9698_ns.class_("PCA9698GPIOPin",   cg.GPIOPin)
-
-# ── Custom config keys ─────────────────────────────────────────────────────────
-CONF_PCA9698_ID       = "pca9698_id"
-CONF_OE_OUTPUT_ID     = "oe_output_id"
-CONF_DIMMER_LEVEL     = "dimmer_level"
-
-# ── Valid I2C address range for PCA9698 ───────────────────────────────────────
-# A2, A1, A0 pins give addresses 0x20–0x27
-_VALID_ADDRESSES = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27]
 
 # ── Component config schema ───────────────────────────────────────────────────
 CONFIG_SCHEMA = (
@@ -56,10 +39,10 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_INTERRUPT_PIN): pins.internal_gpio_input_pin_schema,
             # Polling interval used when no interrupt pin is present
             cv.Optional(CONF_POLLING_INTERVAL, default="50ms"): cv.positive_time_period_milliseconds,
-            # Optional output-enable PWM output for dimming
-            cv.Optional(CONF_OE_OUTPUT_ID): cv.use_id(cg.FloatOutput),
-            # Initial dimmer level (0.0 = fully on, 1.0 = all outputs off)
-            cv.Optional(CONF_DIMMER_LEVEL, default=0.0): cv.percentage,
+            # Optional output-enable PWM output for dimming (any FloatOutput)
+            cv.Optional(CONF_OE_OUTPUT_ID): cv.use_id(output.FloatOutput),
+            # Initial dimmer level: 0.0 = outputs off, 1.0 = fully on
+            cv.Optional(CONF_DIMMER_LEVEL, default=1.0): cv.percentage,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
