@@ -104,10 +104,7 @@ void PCA9698Component::setup() {
   // Configure interrupt pin
   if (use_interrupt_) {
     interrupt_pin_->setup();
-    interrupt_pin_->attach_interrupt(
-        reinterpret_cast<void (*)(void *)>(PCA9698Component::gpio_intr_),
-        this,
-        gpio::INTERRUPT_FALLING_EDGE);
+    interrupt_pin_->attach_interrupt(PCA9698Component::gpio_intr_, this, gpio::INTERRUPT_FALLING_EDGE);
   }
 
   initialised_ = true;
@@ -240,14 +237,12 @@ void PCA9698Component::set_dimmer_level(float level) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool PCA9698Component::read_registers(uint8_t base_reg, uint8_t *data, uint8_t len) {
-  // Use the AI (auto-increment) bit for multi-byte reads
+  // Use the AI (auto-increment) bit for multi-byte reads.
+  // write_read() sends the register address then reads len bytes in one transaction.
   uint8_t reg = base_reg | PCA9698_AI_BIT;
 
   for (uint8_t attempt = 0; attempt < PCA9698_MAX_RETRIES; attempt++) {
-    i2c::ErrorCode err = write_register(reg, nullptr, 0, false);
-    if (err == i2c::ERROR_OK) {
-      err = read(data, len);
-    }
+    i2c::ErrorCode err = write_read(&reg, 1, data, len);
     if (err == i2c::ERROR_OK) return true;
 
     ESP_LOGW(TAG, "I2C read error (reg 0x%02X, attempt %u/%u): %d",
