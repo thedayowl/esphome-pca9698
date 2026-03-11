@@ -19,7 +19,7 @@ AUTO_LOAD = ["output"]
 MULTI_CONF = True  # Allow multiple PCA9698 instances (one per I2C address)
 
 # ── Local config key constants ────────────────────────────────────────────────
-CONF_PCA9698_ID       = "pca9698_id"
+CONF_PCA9698          = "pca9698"       # pin schema key (matches registry key)
 CONF_OE_OUTPUT_ID     = "oe_output_id"
 CONF_DIMMER_LEVEL     = "dimmer_level"
 CONF_INTERRUPT_PIN    = "interrupt_pin"
@@ -87,15 +87,15 @@ PCA9698_PIN_SCHEMA = pins.gpio_base_schema(
     invertible=True,
 ).extend(
     {
-        cv.Required(CONF_PCA9698_ID): cv.use_id(PCA9698Component),
+        cv.Required(CONF_PCA9698): cv.use_id(PCA9698Component),
     }
 )
 
 
-@pins.PIN_SCHEMA_REGISTRY.register("pca9698", PCA9698_PIN_SCHEMA)
+@pins.PIN_SCHEMA_REGISTRY.register(CONF_PCA9698, PCA9698_PIN_SCHEMA)
 async def pca9698_pin_to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
-    parent = await cg.get_variable(config[CONF_PCA9698_ID])
+    parent = await cg.get_variable(config[CONF_PCA9698])
 
     cg.add(var.set_parent(parent))
     cg.add(var.set_pin(config[CONF_NUMBER]))
