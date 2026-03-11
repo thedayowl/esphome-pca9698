@@ -1,0 +1,122 @@
+"""ESPHome external component configuration for PCA9698 40-bit I/O expander."""
+
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome import pins
+from esphome.components import i2c
+from esphome.const import (
+    CONF_ID,
+    CONF_INPUT,
+    CONF_INVERTED,
+    CONF_MODE,
+    CONF_NUMBER,
+    CONF_OUTPUT,
+    CONF_PULLUP,
+    CONF_INTERRUPT_PIN,
+    CONF_POLLING_INTERVAL,
+)
+
+# ── Optional platform-specific PWM / LEDC imports ─────────────────────────────
+try:
+    from esphome.components.ledc import LEDCOutput, CONF_LEDC_ID  # ESP32
+    _HAS_LEDC = True
+except ImportError:
+    _HAS_LEDC = False
+
+try:
+    from esphome.components.esp8266_pwm import ESP8266PWMOutput  # ESP8266
+    _HAS_ESP8266_PWM = True
+except ImportError:
+    _HAS_ESP8266_PWM = False
+
+DEPENDENCIES = ["i2c"]
+AUTO_LOAD = []
+MULTI_CONF = True  # Allow multiple PCA9698 instances (one per I2C address)
+
+# ── C++ namespace / class references ──────────────────────────────────────────
+pca9698_ns = cg.esphome_ns.namespace("pca9698")
+PCA9698Component = pca9698_ns.class_("PCA9698Component", cg.Component, i2c.I2CDevice)
+PCA9698GPIOPin   = pca9698_ns.class_("PCA9698GPIOPin",   cg.GPIOPin)
+
+# ── Custom config keys ─────────────────────────────────────────────────────────
+CONF_PCA9698_ID       = "pca9698_id"
+CONF_OE_OUTPUT_ID     = "oe_output_id"
+CONF_DIMMER_LEVEL     = "dimmer_level"
+
+# ── Valid I2C address range for PCA9698 ───────────────────────────────────────
+# A2, A1, A0 pins give addresses 0x20–0x27
+_VALID_ADDRESSES = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27]
+
+# ── Component config schema ───────────────────────────────────────────────────
+CONFIG_SCHEMA = (
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.declare_id(PCA9698Component),
+            # Interrupt pin is fully optional
+            cv.Optional(CONF_INTERRUPT_PIN): pins.internal_gpio_input_pin_schema,
+            # Polling interval used when no interrupt pin is present
+            cv.Optional(CONF_POLLING_INTERVAL, default="50ms"): cv.positive_time_period_milliseconds,
+            # Optional output-enable PWM output for dimming
+            cv.Optional(CONF_OE_OUTPUT_ID): cv.use_id(cg.FloatOutput),
+            # Initial dimmer level (0.0 = fully on, 1.0 = all outputs off)
+            cv.Optional(CONF_DIMMER_LEVEL, default=0.0): cv.percentage,
+        }
+    )
+    .extend(cv.COMPONENT_SCHEMA)
+    .extend(i2c.i2c_device_schema(0x20))
+)
+
+
+async def to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+    await i2c.register_i2c_device(var, config)
+
+    if CONF_INTERRUPT_PIN in config:
+        irq_pin = await cg.gpio_pin_expression(config[CONF_INTERRUPT_PIN])
+        cg.add(var.set_interrupt_pin(irq_pin))
+
+    cg.add(var.set_polling_interval(config[CONF_POLLING_INTERVAL]))
+
+    if CONF_OE_OUTPUT_ID in config:
+        oe = await cg.get_variable(config[CONF_OE_OUTPUT_ID])
+        cg.add(var.set_oe_output(oe))
+        cg.add(var.set_dimmer_level(config[CONF_DIMMER_LEVEL]))
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Pin schema – used by binary_sensor, switch, etc. via the `pin:` key
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _validate_pin_number(value):
+    value = cv.int_(value)
+    if not 0 <= value <= 39:
+        raise cv.Invalid(f"PCA9698 pin number must be 0–39, got {value}")
+    return value
+
+
+PCA9698_PIN_SCHEMA = pins.gpio_base_schema(
+    PCA9698GPIOPin,
+    _validate_pin_number,
+    modes=[CONF_INPUT, CONF_OUTPUT, CONF_PULLUP],
+    mode_validator=cv.gpio_flags_expr,
+    invertable=True,
+).extend(
+    {
+        cv.Required(CONF_PCA9698_ID): cv.use_id(PCA9698Component),
+    }
+)
+
+
+@pins.PIN_SCHEMA_REGISTRY.register("pca9698", PCA9698_PIN_SCHEMA)
+async def pca9698_pin_to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    parent = await cg.get_variable(config[CONF_PCA9698_ID])
+
+    cg.add(var.set_parent(parent))
+    cg.add(var.set_pin(config[CONF_NUMBER]))
+    cg.add(var.set_inverted(config[CONF_INVERTED]))
+    cg.add(var.set_flags(await cg.gpio_flags_expr(config[CONF_MODE])))
+    cg.add(parent.register_pin(var))
+
+    return var
