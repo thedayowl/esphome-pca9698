@@ -1,0 +1,201 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PCA9698 External Component — Full ESP32 Example                           ║
+# ║                                                                            ║
+# ║  Demonstrates:                                                             ║
+# ║  • Two PCA9698 chips on the same I2C bus (addresses 0x20 and 0x21)        ║
+# ║  • Mixed input/output pins on each chip                                   ║
+# ║  • Interrupt-driven input on chip 1, polling on chip 2                    ║
+# ║  • Output-enable dimmer via LEDC (ESP32 hardware PWM) on chip 1           ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+esphome:
+  name: pca9698-demo-esp32
+  friendly_name: PCA9698 Demo (ESP32)
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+ota:
+  - platform: esphome
+
+# ── External component source ─────────────────────────────────────────────────
+external_components:
+  - source:
+      type: local
+      path: components   # adjust to your repo path
+    components: [pca9698]
+
+# ── I2C bus ───────────────────────────────────────────────────────────────────
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+  frequency: 400kHz
+
+# ── LEDC output for Output-Enable dimmer on chip 1 ───────────────────────────
+# OE is active-LOW.  We drive OE with a PWM signal:
+#   duty = 0.0  → OE always LOW  → all outputs fully enabled  (default/on)
+#   duty = 0.5  → 50 % duty      → ~50 % brightness / dimmed
+#   duty = 1.0  → OE always HIGH → all outputs disabled       (off)
+output:
+  - platform: ledc
+    id: pca9698_oe_pwm
+    pin: GPIO18          # Connect this GPIO → OE pin of PCA9698 #1
+    frequency: 1000 Hz
+    inverted: true       # OE is active-low; invert so 100 % = fully on, 0 % = off
+
+# ── PCA9698 #1 – address 0x20 (A2=0, A1=0, A0=0) ─────────────────────────────
+# Uses interrupt pin for fast input detection + dimmer via LEDC.
+pca9698:
+  - id: io_expander_1
+    address: 0x20
+    interrupt_pin:
+      number: GPIO19       # Connect to INT pin of PCA9698 #1
+      mode: INPUT_PULLUP   # INT is open-drain, active-low
+      inverted: false
+    oe_output_id: pca9698_oe_pwm
+    dimmer_level: 100%     # 100 % = outputs fully enabled at startup
+
+# ── PCA9698 #2 – address 0x21 (A2=0, A1=0, A0=1) ─────────────────────────────
+# No interrupt pin → polling every 100 ms.
+# No OE dimmer → OE should be tied to GND on this chip.
+  - id: io_expander_2
+    address: 0x21
+    polling_interval: 100ms
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Binary sensors (inputs)
+# ══════════════════════════════════════════════════════════════════════════════
+
+binary_sensor:
+  # ── Chip 1 inputs (interrupt-driven) ──────────────────────────────────────
+  - platform: gpio
+    id: button_0
+    name: "Button 0 (chip1 pin0)"
+    pin:
+      pca9698: io_expander_1
+      number: 0             # Port 0, bit 0
+      mode: INPUT
+      inverted: true        # Active-low button
+
+  - platform: gpio
+    id: button_1
+    name: "Button 1 (chip1 pin1)"
+    pin:
+      pca9698: io_expander_1
+      number: 1
+      mode: INPUT
+      inverted: true
+
+  - platform: gpio
+    id: sensor_door
+    name: "Door Sensor (chip1 pin8)"
+    pin:
+      pca9698: io_expander_1
+      number: 8             # Port 1, bit 0
+      mode: INPUT
+      inverted: false
+    device_class: door
+
+  # ── Chip 2 inputs (polled) ────────────────────────────────────────────────
+  - platform: gpio
+    id: motion_1
+    name: "Motion Sensor 1 (chip2 pin0)"
+    pin:
+      pca9698: io_expander_2
+      number: 0
+      mode: INPUT
+    device_class: motion
+
+  - platform: gpio
+    id: limit_switch_a
+    name: "Limit Switch A (chip2 pin16)"
+    pin:
+      pca9698: io_expander_2
+      number: 16            # Port 2, bit 0
+      mode: INPUT
+      inverted: true
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Switches (outputs)
+# ══════════════════════════════════════════════════════════════════════════════
+
+switch:
+  # ── Chip 1 outputs ────────────────────────────────────────────────────────
+  - platform: gpio
+    id: relay_0
+    name: "Relay 0 (chip1 pin16)"
+    pin:
+      pca9698: io_expander_1
+      number: 16            # Port 2, bit 0
+      mode: OUTPUT
+      inverted: false
+
+  - platform: gpio
+    id: relay_1
+    name: "Relay 1 (chip1 pin17)"
+    pin:
+      pca9698: io_expander_1
+      number: 17
+      mode: OUTPUT
+
+  - platform: gpio
+    id: led_status
+    name: "Status LED (chip1 pin24)"
+    pin:
+      pca9698: io_expander_1
+      number: 24            # Port 3, bit 0
+      mode: OUTPUT
+      inverted: true        # LED on when pin LOW
+
+  # ── Chip 2 outputs ────────────────────────────────────────────────────────
+  - platform: gpio
+    id: pump_enable
+    name: "Pump Enable (chip2 pin8)"
+    pin:
+      pca9698: io_expander_2
+      number: 8
+      mode: OUTPUT
+
+  - platform: gpio
+    id: valve_1
+    name: "Valve 1 (chip2 pin9)"
+    pin:
+      pca9698: io_expander_2
+      number: 9
+      mode: OUTPUT
+
+  - platform: gpio
+    id: valve_2
+    name: "Valve 2 (chip2 pin10)"
+    pin:
+      pca9698: io_expander_2
+      number: 10
+      mode: OUTPUT
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Number entity – control the output dimmer level via Home Assistant
+# 0 % = outputs fully off (OE high), 100 % = outputs fully on (OE low)
+# ══════════════════════════════════════════════════════════════════════════════
+number:
+  - platform: template
+    id: output_dimmer
+    name: "PCA9698 Output Dimmer"
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    lambda: "return id(pca9698_oe_pwm).get_state() * 100.0f;"
+    set_action:
+      - lambda: |-
+          id(io_expander_1).set_dimmer_level(x / 100.0f);
