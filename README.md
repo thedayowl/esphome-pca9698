@@ -106,7 +106,7 @@ pca9698:
 
     # ── Output-enable dimmer (optional) ──────────────────────────────────
     oe_output_id: pca9698_oe_pwm  # id of a ledc or esp8266_pwm output
-    dimmer_level: 0%             # 0 % = fully on, 100 % = fully off
+    dimmer_level: 100%           # 0 % = outputs off, 100 % = fully on (default)
 ```
 
 ### Pin schema (used inside `binary_sensor`, `switch`, etc.)
@@ -125,7 +125,10 @@ pin:
 
 ```yaml
 external_components:
-  - source: { type: local, path: components }
+  - source:
+      type: git
+      url: https://github.com/thedayowl/esphome-pca9698
+      ref: main
     components: [pca9698]
 
 i2c:
