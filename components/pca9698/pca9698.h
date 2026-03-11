@@ -63,6 +63,13 @@ class PCA9698GPIOPin : public GPIOPin {
   uint8_t get_pin() const { return pin_; }
   gpio::Flags get_flags() const { return flags_; }
 
+  // Propagate parent health to child components (switches, binary_sensors, etc.)
+  // so Home Assistant marks their entities unavailable when comms fail.
+  // Covers both hard failure (mark_failed) and transient I2C errors.
+  bool is_failed() const {
+    return parent_ == nullptr || parent_->is_failed() || !parent_->is_comms_ok();
+  }
+
  protected:
   PCA9698Component *parent_{nullptr};
   uint8_t pin_{0};
@@ -96,6 +103,10 @@ class PCA9698Component : public Component, public i2c::I2CDevice {
 
   // ── Register all pins with the component ──────────────────────────────────
   void register_pin(PCA9698GPIOPin *pin) { registered_pins_.push_back(pin); }
+
+  // Returns false if I2C communication with the chip is currently failing.
+  // Used by PCA9698GPIOPin::is_failed() to propagate unavailability to HA.
+  bool is_comms_ok() const { return comms_ok_; }
 
  protected:
   // ── I2C helpers with retry logic ──────────────────────────────────────────
@@ -131,6 +142,7 @@ class PCA9698Component : public Component, public i2c::I2CDevice {
   bool use_interrupt_{false};
   bool initialised_{false};
   bool has_inputs_{false};
+  bool comms_ok_{true};  // Tracks whether the last I2C operation succeeded
 
   // ── Output-enable / dimmer ────────────────────────────────────────────────
   output::FloatOutput *oe_output_{nullptr};
