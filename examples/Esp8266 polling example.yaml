@@ -1,0 +1,225 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  PCA9698 External Component — ESP8266 Example                             ║
+# ║                                                                            ║
+# ║  Demonstrates:                                                             ║
+# ║  • Single PCA9698 at 0x20                                                 ║
+# ║  • Polling mode only (no interrupt pin)                                   ║
+# ║  • Output-enable dimmer via ESP8266 software PWM                          ║
+# ║  • All 40 pins assigned (32 outputs + 8 inputs)                           ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+esphome:
+  name: pca9698-demo-esp8266
+
+esp8266:
+  board: nodemcuv2
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+ota:
+  - platform: esphome
+
+# ── External component source ─────────────────────────────────────────────────
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [pca9698]
+
+# ── I2C bus ───────────────────────────────────────────────────────────────────
+i2c:
+  sda: D2   # GPIO4
+  scl: D1   # GPIO5
+  scan: true
+
+# ── ESP8266 software PWM for Output-Enable dimmer ────────────────────────────
+output:
+  - platform: esp8266_pwm
+    id: pca9698_oe_pwm
+    pin: D5    # GPIO14 → OE pin of PCA9698
+    frequency: 1000 Hz
+    inverted: true       # OE is active-low; invert so 100 % = fully on, 0 % = off
+
+# ── PCA9698 – polling mode, 50 ms interval ────────────────────────────────────
+pca9698:
+  - id: io_expander
+    address: 0x20
+    polling_interval: 50ms   # No interrupt pin – use polling
+    oe_output_id: pca9698_oe_pwm
+    dimmer_level: 100%        # 100 % = outputs fully enabled at startup
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Binary sensors – Port 0 (pins 0–7) as inputs
+# ══════════════════════════════════════════════════════════════════════════════
+
+binary_sensor:
+  - platform: gpio
+    name: "Input Pin 0"
+    pin: { pca9698: io_expander, number: 0, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 1"
+    pin: { pca9698: io_expander, number: 1, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 2"
+    pin: { pca9698: io_expander, number: 2, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 3"
+    pin: { pca9698: io_expander, number: 3, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 4"
+    pin: { pca9698: io_expander, number: 4, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 5"
+    pin: { pca9698: io_expander, number: 5, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 6"
+    pin: { pca9698: io_expander, number: 6, mode: INPUT }
+
+  - platform: gpio
+    name: "Input Pin 7"
+    pin: { pca9698: io_expander, number: 7, mode: INPUT }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Switches – Ports 1–4 (pins 8–39) as outputs
+# ══════════════════════════════════════════════════════════════════════════════
+
+switch:
+  - platform: gpio
+    name: "Output Pin 8"
+    pin: { pca9698: io_expander, number: 8,  mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 9"
+    pin: { pca9698: io_expander, number: 9,  mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 10"
+    pin: { pca9698: io_expander, number: 10, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 11"
+    pin: { pca9698: io_expander, number: 11, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 12"
+    pin: { pca9698: io_expander, number: 12, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 13"
+    pin: { pca9698: io_expander, number: 13, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 14"
+    pin: { pca9698: io_expander, number: 14, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 15"
+    pin: { pca9698: io_expander, number: 15, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 16"
+    pin: { pca9698: io_expander, number: 16, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 17"
+    pin: { pca9698: io_expander, number: 17, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 18"
+    pin: { pca9698: io_expander, number: 18, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 19"
+    pin: { pca9698: io_expander, number: 19, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 20"
+    pin: { pca9698: io_expander, number: 20, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 21"
+    pin: { pca9698: io_expander, number: 21, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 22"
+    pin: { pca9698: io_expander, number: 22, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 23"
+    pin: { pca9698: io_expander, number: 23, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 24"
+    pin: { pca9698: io_expander, number: 24, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 25"
+    pin: { pca9698: io_expander, number: 25, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 26"
+    pin: { pca9698: io_expander, number: 26, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 27"
+    pin: { pca9698: io_expander, number: 27, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 28"
+    pin: { pca9698: io_expander, number: 28, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 29"
+    pin: { pca9698: io_expander, number: 29, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 30"
+    pin: { pca9698: io_expander, number: 30, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 31"
+    pin: { pca9698: io_expander, number: 31, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 32"
+    pin: { pca9698: io_expander, number: 32, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 33"
+    pin: { pca9698: io_expander, number: 33, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 34"
+    pin: { pca9698: io_expander, number: 34, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 35"
+    pin: { pca9698: io_expander, number: 35, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 36"
+    pin: { pca9698: io_expander, number: 36, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 37"
+    pin: { pca9698: io_expander, number: 37, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 38"
+    pin: { pca9698: io_expander, number: 38, mode: OUTPUT }
+
+  - platform: gpio
+    name: "Output Pin 39"
+    pin: { pca9698: io_expander, number: 39, mode: OUTPUT }
