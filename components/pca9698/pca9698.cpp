@@ -234,10 +234,22 @@ bool PCA9698Component::read_registers(uint8_t base_reg, uint8_t *data, uint8_t l
 
   for (uint8_t attempt = 0; attempt < PCA9698_MAX_RETRIES; attempt++) {
     i2c::ErrorCode err = write_read(&reg, 1, data, len);
-    if (err == i2c::ERROR_OK) return true;
+    if (err == i2c::ERROR_OK) {
+      if (!comms_ok_) {
+        comms_ok_ = true;
+        status_clear_error();
+        ESP_LOGI(TAG, "I2C communication restored");
+      }
+      return true;
+    }
     ESP_LOGW(TAG, "I2C read error (reg 0x%02X, attempt %u/%u): %d",
              base_reg, attempt + 1, PCA9698_MAX_RETRIES, (int) err);
     delay(5);
+  }
+  if (comms_ok_) {
+    comms_ok_ = false;
+    status_set_error("I2C communication failed");
+    ESP_LOGE(TAG, "I2C communication lost – entities will show unavailable in HA");
   }
   return false;
 }
@@ -249,10 +261,22 @@ bool PCA9698Component::write_registers(uint8_t base_reg, const uint8_t *data, ui
 
   for (uint8_t attempt = 0; attempt < PCA9698_MAX_RETRIES; attempt++) {
     i2c::ErrorCode err = write_register(reg, data, len);
-    if (err == i2c::ERROR_OK) return true;
+    if (err == i2c::ERROR_OK) {
+      if (!comms_ok_) {
+        comms_ok_ = true;
+        status_clear_error();
+        ESP_LOGI(TAG, "I2C communication restored");
+      }
+      return true;
+    }
     ESP_LOGW(TAG, "I2C write error (reg 0x%02X, attempt %u/%u): %d",
              base_reg, attempt + 1, PCA9698_MAX_RETRIES, (int) err);
     delay(5);
+  }
+  if (comms_ok_) {
+    comms_ok_ = false;
+    status_set_error("I2C communication failed");
+    ESP_LOGE(TAG, "I2C communication lost – entities will show unavailable in HA");
   }
   return false;
 }
