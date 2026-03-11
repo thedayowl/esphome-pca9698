@@ -194,6 +194,7 @@ light:
     id: output_dimmer
     name: "PCA9698 Output Brightness"
     output: pca9698_oe_pwm
+    restore_mode: RESTORE_DEFAULT_ON
     default_transition_length: 500ms
     on_state:
       - lambda: |-
