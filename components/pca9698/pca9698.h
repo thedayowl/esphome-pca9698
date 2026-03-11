@@ -3,14 +3,8 @@
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
 #include "esphome/components/i2c/i2c.h"
+#include "esphome/components/output/float_output.h"
 #include "esphome/core/log.h"
-
-#ifdef USE_ESP32
-#include "esphome/components/ledc/ledc_output.h"
-#endif
-#ifdef USE_ESP8266
-#include "esphome/components/esp8266_pwm/esp8266_pwm.h"
-#endif
 
 #include <vector>
 #include <cstdint>
@@ -91,12 +85,7 @@ class PCA9698Component : public Component, public i2c::I2CDevice {
   void set_interrupt_pin(InternalGPIOPin *pin) { interrupt_pin_ = pin; }
   void set_polling_interval(uint32_t ms) { polling_interval_ms_ = ms; }
 
-#ifdef USE_ESP32
-  void set_oe_output(ledc::LEDCOutput *oe) { oe_output_ = oe; }
-#endif
-#ifdef USE_ESP8266
-  void set_oe_output(esp8266_pwm::ESP8266PWMOutput *oe) { oe_output_ = oe; }
-#endif
+  void set_oe_output(output::FloatOutput *oe) { oe_output_ = oe; }
 
   void set_dimmer_level(float level);  // 0.0 = fully on, 1.0 = all outputs off
 
@@ -144,12 +133,7 @@ class PCA9698Component : public Component, public i2c::I2CDevice {
   bool has_inputs_{false};
 
   // ── Output-enable / dimmer ────────────────────────────────────────────────
-#ifdef USE_ESP32
-  ledc::LEDCOutput *oe_output_{nullptr};
-#endif
-#ifdef USE_ESP8266
-  esp8266_pwm::ESP8266PWMOutput *oe_output_{nullptr};
-#endif
+  output::FloatOutput *oe_output_{nullptr};
   float dimmer_level_{0.0f};  // 0.0 = outputs fully enabled (OE pulled low via PWM duty=0)
 
   // ── Registered pins ───────────────────────────────────────────────────────
