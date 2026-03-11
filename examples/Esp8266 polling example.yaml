@@ -28,8 +28,9 @@ ota:
 # ── External component source ─────────────────────────────────────────────────
 external_components:
   - source:
-      type: local
-      path: ../components
+      type: git
+      url: https://github.com/thedayowl/esphome-pca9698
+      ref: main
     components: [pca9698]
 
 # ── I2C bus ───────────────────────────────────────────────────────────────────
