@@ -1,0 +1,8 @@
+name: pca9698
+description: PCA9698 40-bit I2C GPIO expander (NXP) with optional interrupt, polling, and output-enable dimmer
+url: https://www.nxp.com/docs/en/data-sheet/PCA9698.pdf
+codeowners:
+  - ""
+hasfreeform: false
+dependencies:
+  - i2c
