@@ -15,9 +15,10 @@ NXP PCA9698 — 40-bit open-drain I/O port expander for I²C-bus
 | **Interrupt-driven input** | Optional INT pin for near-instant input change detection |
 | **Polling fallback** | Configurable polling interval when no INT pin is wired |
 | **Output verification** | Periodic read-back + correction of output register mismatches |
-| **I²C retry** | Automatic retry (×3) on any I²C error, with `mark_failed()` after exhaustion |
+| **I²C retry** | Automatic retry (×3) on any I²C error with 5 ms back-off |
+| **Comms health tracking** | `is_comms_ok()` reflects live I²C status; drives HA availability |
 | **OE dimmer** | Optional LEDC (ESP32) or software PWM (ESP8266) on the Output Enable pin |
-| **Platform** | ESP32 + ESP8266 via Arduino framework |
+| **Platform** | ESP32 (Arduino + IDF) and ESP8266 (Arduino) |
 
 ---
 
@@ -67,10 +68,19 @@ examples/
 - To use the dimmer: connect a GPIO (LEDC on ESP32 / software PWM on ESP8266)
   to the OE pin.
 - Set `inverted: true` on the PWM output so that the brightness scale is intuitive:
-- `dimmer_level: 0%` (default off) → PWM duty = 0 % → OE pulled HIGH → outputs disabled.
-- `dimmer_level: 100%` → PWM duty = 100 % → OE pulled LOW → outputs fully enabled.
-- Intermediate values produce proportional duty-cycle dimming.
+  - `dimmer_level: 0%` → PWM duty = 0% → OE HIGH → outputs disabled
+  - `dimmer_level: 100%` → PWM duty = 100% → OE LOW → outputs fully enabled
+  - Intermediate values produce proportional duty-cycle dimming.
+- Expose the dimmer as a **monochromatic light** entity in Home Assistant (see
+  examples) so it appears as a dimmable light card with on/off and brightness slider.
 - If you do **not** use the dimmer, tie OE directly to GND.
+
+### RESET Pin
+
+- Active-low. Must be held HIGH for normal operation.
+- If floating, the chip will be held in reset and will not respond to I²C writes
+  even though it may still ACK its address during a bus scan.
+- Tie to VCC or drive from a GPIO if software reset is needed.
 
 ### Pin Numbering
 
@@ -92,31 +102,31 @@ Pins are numbered 0–39 consecutively:
 
 ```yaml
 pca9698:
-  - id: <component_id>           # required
-    address: 0x20                # I²C address  (default: 0x20)
+  - id: expander                 # required
+    address: 0x20                # I²C address (default: 0x20)
 
-    # ── Interrupt pin (optional) ─────────────────────────────────────────
+    # ── Interrupt pin (optional) ─────────────────────────────────────────────
     interrupt_pin:
       number: GPIO19
       mode: INPUT_PULLUP
     # If omitted, the component falls back to polling.
 
-    # ── Polling interval (used only when interrupt_pin is absent) ────────
+    # ── Polling interval (used only when interrupt_pin is absent) ────────────
     polling_interval: 50ms       # default: 50 ms
 
-    # ── Output-enable dimmer (optional) ──────────────────────────────────
+    # ── Output-enable dimmer (optional) ──────────────────────────────────────
     oe_output_id: pca9698_oe_pwm  # id of a ledc or esp8266_pwm output
-    dimmer_level: 100%           # 0 % = outputs off, 100 % = fully on (default)
+    dimmer_level: 100%            # 0% = outputs off, 100% = fully on (default)
 ```
 
 ### Pin schema (used inside `binary_sensor`, `switch`, etc.)
 
 ```yaml
 pin:
-  pca9698: <component_id>        # required  – refers to the pca9698: id
-  number: 0                      # required  – 0–39
+  pca9698: <component_id>        # required – refers to the pca9698: id
+  number: 0                      # required – 0–39
   mode: INPUT                    # INPUT | OUTPUT | INPUT_PULLUP
-  inverted: false                # optional  – invert logic level
+  inverted: false                # optional – invert logic level
 ```
 
 ---
@@ -138,7 +148,6 @@ i2c:
 pca9698:
   - id: expander
     address: 0x20
-    # No interrupt_pin → no polling needed for outputs-only use
 
 switch:
   - platform: gpio
@@ -147,6 +156,62 @@ switch:
       pca9698: expander
       number: 0
       mode: OUTPUT
+```
+
+---
+
+## OE Dimmer as a Monochromatic Light
+
+When the OE pin is driven by a PWM output, all chip outputs dim together.
+The natural way to expose this in Home Assistant is as a monochromatic light
+entity, which gives you a proper light card with on/off toggle and brightness
+slider, and supports scenes and transitions.
+
+```yaml
+output:
+  - platform: ledc
+    id: pca9698_oe_pwm
+    pin: GPIO18
+    frequency: 1000 Hz
+    inverted: true       # OE active-low: 100% duty = fully on, 0% = off
+
+pca9698:
+  - id: expander
+    address: 0x20
+    oe_output_id: pca9698_oe_pwm
+    dimmer_level: 100%
+
+light:
+  - platform: monochromatic
+    id: output_dimmer
+    name: "PCA9698 Output Brightness"
+    output: pca9698_oe_pwm
+    restore_mode: RESTORE_DEFAULT_ON   # restore brightness on reboot
+    default_transition_length: 500ms
+    on_state:
+      - lambda: |-
+          if (id(output_dimmer).current_values.is_on()) {
+            id(expander).set_dimmer_level(
+              id(output_dimmer).current_values.get_brightness());
+          } else {
+            id(expander).set_dimmer_level(0.0f);
+          }
+```
+
+Because OE is a global control, all outputs on the chip dim together.
+Model the individual output pins as `binary` lights (on/off only) rather
+than switches, and use the monochromatic entity as the master brightness:
+
+```yaml
+light:
+  - platform: binary
+    name: "Light 0"
+    output: light_0_output
+
+output:
+  - platform: gpio
+    id: light_0_output
+    pin: { pca9698: expander, number: 16, mode: OUTPUT }
 ```
 
 ---
@@ -175,21 +240,100 @@ binary_sensor:
 
 ---
 
+## Comms Health & Home Assistant Availability
+
+### How it works
+
+The component tracks I²C communication health with an internal `comms_ok_`
+flag that is updated on every I²C transaction:
+
+- After **3 consecutive failures** on any read or write, `comms_ok_` is set to
+  `false` and `status_set_error()` is called on the component. A log message
+  is emitted at ERROR level.
+- As soon as **any subsequent transaction succeeds**, `comms_ok_` is restored
+  to `true`, `status_clear_error()` is called, and a recovery message is logged
+  at INFO level.
+
+`PCA9698GPIOPin::is_failed()` returns `true` whenever the parent component is
+either hard-failed (`mark_failed()`) or has lost comms (`!comms_ok_`). This
+means ESPHome's GPIO infrastructure treats the pins as failed during an outage.
+
+### Limitation
+
+ESPHome's native API does not propagate pin-level failure as entity
+unavailability for `switch` or `binary_sensor` entities — those entities keep
+their last known state in Home Assistant rather than going unavailable. To
+surface chip health explicitly, expose `is_comms_ok()` as a template binary
+sensor and use it in your automations or dashboards.
+
+### Health sensor (recommended)
+
+Add a template binary sensor for each chip. Use `device_class: connectivity`
+so Home Assistant displays it as a connectivity indicator:
+
+```yaml
+binary_sensor:
+  - platform: template
+    id: chip_health
+    name: "PCA9698 Health"
+    device_class: connectivity
+    lambda: "return id(expander).is_comms_ok();"
+```
+
+### Using health in Home Assistant
+
+**Dashboard**: Add the health sensor to your dashboard. It will show
+"Connected" / "Disconnected" with the standard connectivity icon.
+
+**Alert automation**: Notify when a chip goes offline:
+
+```yaml
+automation:
+  - alias: "PCA9698 offline alert"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.pca9698_health
+        to: "off"
+    action:
+      - service: notify.mobile_app
+        data:
+          message: "PCA9698 I²C chip has gone offline!"
+```
+
+**Conditional entity availability**: Use a template in HA to suppress
+automations that depend on chip outputs when the chip is offline:
+
+```yaml
+condition:
+  - condition: state
+    entity_id: binary_sensor.pca9698_health
+    state: "on"
+```
+
+---
+
 ## Robustness Details
+
+### Startup Probe
+
+Before any configuration writes, `setup()` performs a burst read of all 5
+input ports. If the chip does not respond, `mark_failed()` is called
+immediately with a clear log message indicating the address and error code.
+This produces a much more informative failure than a generic "unspecified"
+error from a mid-setup write failure.
 
 ### I²C Retries
 
-Every read and write operation is retried up to **3 times** before the
-component marks itself as failed (`mark_failed()`). A 5 ms back-off is
-inserted between attempts.
+Every read and write operation is retried up to **3 times** with a 5 ms
+back-off between attempts before the comms health flag is set to `false`.
 
 ### Output Verification
 
 Every **5 seconds** the component reads back the output latch registers from
 the chip and compares them with the internal shadow registers. Any mismatch
 on output-configured bits triggers a full re-write of all output registers.
-This guards against transient I²C glitches that corrupted a write, power
-dips that reset the chip, or any other cause of state divergence.
+This guards against transient I²C glitches, power dips that reset the chip,
+or any other cause of state divergence between the ESP and the chip.
 
 ### Interrupt Mask
 
@@ -198,13 +342,13 @@ that toggling outputs does not trigger spurious INT assertions.
 
 ---
 
-## Tested Frameworks
+## Tested Platforms
 
 | Platform | Framework | Status |
 |----------|-----------|--------|
-| ESP32    | Arduino   | ✅ |
-| ESP8266  | Arduino   | ✅ |
-| ESP32    | IDF       | ⚠️ LEDC API differences may require minor changes |
+| ESP32    | IDF       | ✅     |
+| ESP32    | Arduino   | ✅     |
+| ESP8266  | Arduino   | ✅     |
 
 ---
 
