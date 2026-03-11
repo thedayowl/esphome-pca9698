@@ -80,6 +80,26 @@ pca9698:
 # ══════════════════════════════════════════════════════════════════════════════
 
 binary_sensor:
+  # ── Chip health sensors ───────────────────────────────────────────────────
+  # These template sensors reflect whether each chip's I2C comms are healthy.
+  # When comms fail, the sensor goes OFF. Use these in Home Assistant as an
+  # availability condition for automations, or to trigger alerts.
+  # Note: ESPHome switch entities do not natively support unavailability via
+  # the native API, but binary_sensor entities do (via missing_state). For
+  # full unavailability support, handle this in Home Assistant automations
+  # using these health sensors.
+  - platform: template
+    id: chip1_health
+    name: "PCA9698 Chip 1 Health"
+    device_class: connectivity
+    lambda: "return id(io_expander_1).is_comms_ok();"
+
+  - platform: template
+    id: chip2_health
+    name: "PCA9698 Chip 2 Health"
+    device_class: connectivity
+    lambda: "return id(io_expander_2).is_comms_ok();"
+
   # ── Chip 1 inputs (interrupt-driven) ──────────────────────────────────────
   - platform: gpio
     id: button_0
